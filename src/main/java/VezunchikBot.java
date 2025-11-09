@@ -45,28 +45,7 @@ public class VezunchikBot extends TelegramLongPollingBot {
             String[] parts = data.split("_");
             String heroName = parts[1];
 
-            Order order = getOrder(chatId);
-
-            if (heroName.equals("skip")){
-                acceptOrder(order, chatId, username);
-                return;
-            }
-
-            Hero found = findHeroByName(heroName);
-
-            if (order.hasHero(heroName)){
-               order.removeHero(found);
-            }
-            else{
-                order.addHero(found);
-            }
-
-            if (order.hasRequiredCount(config.getHeroesLimit())){
-                acceptOrder(order, chatId, username);
-                return;
-            }
-
-            sendHeroesPage(chatId, 0);
+            handleHeroCallback(chatId, heroName, username);
         }
         else if (data.startsWith("pageNav_")){
             String[] parts = data.split("_");
@@ -76,11 +55,29 @@ public class VezunchikBot extends TelegramLongPollingBot {
         }
     }
 
-    private void acceptOrder(Order order, long chatId, String username) {
-        String orderInfo = order.getInfo();
-        sendMessage(chatId, "Вы выбрали: " + orderInfo);
-        sendMessageToAdmin("@" + username + " выбрал: " + orderInfo);
-        order.clear();
+    private void handleHeroCallback(long chatId, String heroName, String username) {
+        Order order = getOrder(chatId);
+
+        if (heroName.equals("skip")){
+            acceptOrder(order, chatId, username);
+            return;
+        }
+
+        Hero found = findHeroByName(heroName);
+
+        if (order.hasHero(heroName)){
+           order.removeHero(found);
+        }
+        else{
+            order.addHero(found);
+        }
+
+        if (order.hasRequiredCount(config.getHeroesLimit())){
+            acceptOrder(order, chatId, username);
+            return;
+        }
+
+        sendHeroesPage(chatId, 0);
     }
 
     private void handleTextMessage(Update update) {
@@ -98,6 +95,13 @@ public class VezunchikBot extends TelegramLongPollingBot {
         }
     }
 
+    private void acceptOrder(Order order, long chatId, String username) {
+        String orderInfo = order.getInfo();
+        sendMessage(chatId, "Вы выбрали: " + orderInfo);
+        sendMessageToAdmin("@" + username + " выбрал: " + orderInfo);
+        order.clear();
+    }
+
     private void sendHeroesPage(long chatId, int page){
         Order order = getOrder(chatId);
 
@@ -106,44 +110,12 @@ public class VezunchikBot extends TelegramLongPollingBot {
         String text = "Выберите персонажа:";
         selector.setText(text);
 
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
         int from = page * config.getPageSize();
         int to = Math.min(from + config.getPageSize(), heroes.size());
 
-        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-
-        BotLogger.info("Buttons started creating...");
-        for (int i = from; i < to; i++){
-            Hero hero = heroes.get(i);
-
-            String heroName = hero.getName();
-            if (heroName == null || heroName.isBlank()) {
-                BotLogger.warn("Hero name is null or empty, skipping");
-                continue;
-            }
-
-            BotLogger.info(hero.getName());
-            List<InlineKeyboardButton> row = new ArrayList<>();
-            try {
-                InlineKeyboardButton button = new InlineKeyboardButton();
-
-                if (order != null && order.hasHero(heroName)){
-                    button.setText(hero.getName() + " ✅");
-                    button.setCallbackData("hero_" + hero.getName());
-                    BotLogger.info("Order already has " + hero.getName());
-                } else {
-                    button.setText(hero.getName());
-                    button.setCallbackData("hero_" + hero.getName());
-                    BotLogger.info(hero.getName() + " button added!");
-                }
-
-                row.add(button);
-                rows.add(row);
-            } catch (Exception e) {
-                BotLogger.error("Error while creating button for hero: " + heroName);
-                System.out.println(e);
-            }
-        }
-        BotLogger.info("Buttons created and added to rows");
+        addHeroesButtons(from, to, order, rows);
 
         boolean canSkip = !getOrder(chatId).hasNoHeroes();
 
@@ -158,21 +130,55 @@ public class VezunchikBot extends TelegramLongPollingBot {
             rows.add(navRow);
         }
 
-
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup(rows);
         selector.setReplyMarkup(markup);
-
-
-        BotLogger.info("Rows size: " + rows.size());
-        for (List<InlineKeyboardButton> r : rows) {
-            BotLogger.info("Row: " + r);
-        }
 
         try {
             execute(selector);
         } catch (TelegramApiException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void addHeroesButtons(int from, int to, Order order, List<List<InlineKeyboardButton>> rows) {
+        BotLogger.info("Buttons started creating...");
+        for (int i = from; i < to; i++){
+            Hero hero = heroes.get(i);
+
+            String heroName = hero.getName();
+            if (heroName == null || heroName.isBlank()) {
+                BotLogger.warn("Hero name is null or empty, skipping");
+                continue;
+            }
+
+            BotLogger.info(hero.getName());
+            List<InlineKeyboardButton> row = new ArrayList<>();
+            try {
+                InlineKeyboardButton button = getHeroButton(order, hero);
+
+                row.add(button);
+                rows.add(row);
+            } catch (Exception e) {
+                BotLogger.error("Error while creating button for hero: " + heroName);
+                System.out.println(e);
+            }
+        }
+        BotLogger.info("Buttons created and added to rows");
+    }
+
+    private static InlineKeyboardButton getHeroButton(Order order, Hero hero) {
+        InlineKeyboardButton button = new InlineKeyboardButton();
+
+        if (order != null && order.hasHero(hero.getName())){
+            button.setText(hero.getName() + " ✅");
+            button.setCallbackData("hero_" + hero.getName());
+            BotLogger.info("Order already has " + hero.getName());
+        } else {
+            button.setText(hero.getName());
+            button.setCallbackData("hero_" + hero.getName());
+            BotLogger.info(hero.getName() + " button added!");
+        }
+        return button;
     }
 
     private Hero findHeroByName(String heroName){
