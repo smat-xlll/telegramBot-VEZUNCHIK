@@ -5,6 +5,7 @@ import java.util.Properties;
 public class BotConfig {
     private final Properties props = new Properties();
     private final int PAGE_SIZE = 6;
+    private final int HEROES_LIMIT = 5;
 
     public BotConfig(){
         try (InputStream input = getClass().getClassLoader().getResourceAsStream("application.properties")) {
@@ -18,6 +19,9 @@ public class BotConfig {
         }
     }
 
+    public final int getHeroesLimit(){
+        return HEROES_LIMIT;
+    }
     public final String getBotToken(){
         return props.getProperty("bot.token");
     }

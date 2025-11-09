@@ -23,6 +23,7 @@ public class VezunchikBot extends TelegramLongPollingBot {
             new Hero("Дмитрий Нагиев6")
     ));
     private Map<Long,Integer> userPage = new HashMap<>();
+    private Map<Long,Order> userOrder = new HashMap<>();
 
     @Override
     public void onUpdateReceived(Update update) {
@@ -43,15 +44,46 @@ public class VezunchikBot extends TelegramLongPollingBot {
         if (data.startsWith("hero_")){
             String[] parts = data.split("_");
             String heroName = parts[1];
-            sendMessage(chatId, "Вы выбрали: " + heroName);
-            sendMessageToAdmin("@" + username + " выбрал: " + heroName);
+
+            Order order = getOrder(chatId);
+
+            if (heroName.equals("skip")){
+                acceptOrder(order, chatId, username);
+                return;
+            }
+
+            Hero found = findHeroByName(heroName);
+            if (found == null){
+                BotLogger.warn("Hero not found");
+            }// warn
+
+            if (order.hasHero(heroName)){
+               order.removeHero(found);
+            }
+            else{
+                order.addHero(found);
+            }
+
+            if (order.hasAddedAllHeroes(config.getHeroesLimit())){
+                acceptOrder(order, chatId, username);
+            }
+            else{
+                sendHeroesPage(chatId, 0);
+            }
         }
         else if (data.startsWith("pageNav_")){
             String[] parts = data.split("_");
             int page = Integer.parseInt(parts[1]);
             userPage.put(chatId, page);
-            sendHeroesPage(chatId, page, "Выберите персонажа:");
+            sendHeroesPage(chatId, page);
         }
+    }
+
+    private void acceptOrder(Order order, long chatId, String username) {
+        String orderInfo = order.getInfo();
+        sendMessage(chatId, "Вы выбрали: " + orderInfo);
+        sendMessageToAdmin("@" + username + " выбрал: " + orderInfo);
+        order.clear();
     }
 
     private void handleTextMessage(Update update) {
@@ -61,16 +93,20 @@ public class VezunchikBot extends TelegramLongPollingBot {
 
         switch (text){
             case "/start":
-                sendHeroesPage(chatId, 0, "Кого хотите видеть на празднике?");
+                BotLogger.info("Sended command /start");
+                sendHeroesPage(chatId, 0);
                 break;
             default:
                 throw new IllegalStateException("Unexpected value: " + text);
         }
     }
 
-    private void sendHeroesPage(long chatId, int page, String text){
+    private void sendHeroesPage(long chatId, int page){
+        Order order = getOrder(chatId);
+
         SendMessage selector = new SendMessage();
         selector.setChatId(chatId);
+        String text = "Выберите персонажа:";
         selector.setText(text);
 
         int from = page * config.getPageSize();
@@ -78,27 +114,86 @@ public class VezunchikBot extends TelegramLongPollingBot {
 
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
+        BotLogger.info("Buttons started creating...");
         for (int i = from; i < to; i++){
-            List<InlineKeyboardButton> row = new ArrayList<>();
             Hero hero = heroes.get(i);
-            InlineKeyboardButton button = new InlineKeyboardButton();
-            button.setText(hero.getName());
-            button.setCallbackData("hero_" + hero.getName());
-            row.add(button);
-            rows.add(row);
+
+            String heroName = hero.getName();
+            if (heroName == null || heroName.isBlank()) {
+                BotLogger.warn("Hero name is null or empty, skipping");
+                continue;
+            }
+
+            BotLogger.info(hero.getName());
+            List<InlineKeyboardButton> row = new ArrayList<>();
+            try {
+                InlineKeyboardButton button = new InlineKeyboardButton();
+
+                if (order != null && order.hasHero(heroName)){
+                    button.setText(hero.getName() + " ✅");
+                    button.setCallbackData("hero_" + hero.getName());
+                    BotLogger.info("Order already has " + hero.getName());
+                } else {
+                    button.setText(hero.getName());
+                    button.setCallbackData("hero_" + hero.getName());
+                    BotLogger.info(hero.getName() + " button added!");
+                }
+
+                row.add(button);
+                rows.add(row);
+            } catch (Exception e) {
+                BotLogger.error("Error while creating button for hero: " + heroName);
+                System.out.println(e);
+            }
+        }
+        BotLogger.info("Buttons created and added to rows");
+
+        boolean canSkip = !getOrder(chatId).hasNoHeroes();
+
+        if (canSkip) {
+            List<InlineKeyboardButton> skipRow = new ArrayList<>();
+            skipRow.add(getHeroSkipButton());
+            rows.add(skipRow);
+        }
+
+        List<InlineKeyboardButton> navRow = getNavRowButtons(page, to, heroes.size());
+        if (!navRow.isEmpty()) {
+            rows.add(navRow);
         }
 
 
-        rows.add(getNavRowButtons(page, to, heroes.size()));
-
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup(rows);
         selector.setReplyMarkup(markup);
+
+
+        BotLogger.info("Rows size: " + rows.size());
+        for (List<InlineKeyboardButton> r : rows) {
+            BotLogger.info("Row: " + r);
+        }
 
         try {
             execute(selector);
         } catch (TelegramApiException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private Hero findHeroByName(String heroName){
+        Hero found = null;
+        for (Hero h : heroes){
+            if (h.getName().equals(heroName)){
+                found = h;
+                break;
+            }
+        }
+        return found;
+    }
+
+    private InlineKeyboardButton getHeroSkipButton(){
+        InlineKeyboardButton skipButton = new InlineKeyboardButton();
+        skipButton.setText("Мне хватит 👍");
+        skipButton.setCallbackData("hero_skip");
+        return skipButton;
     }
 
     private List<InlineKeyboardButton> getNavRowButtons(int currentPage, int lastIndexOnPage, int lastIndex){
@@ -130,6 +225,18 @@ public class VezunchikBot extends TelegramLongPollingBot {
         } catch (TelegramApiException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private Order getOrder(long chatId){
+        Order order;
+        if (userOrder.containsKey(chatId)) {
+            order = userOrder.get(chatId);
+        }
+        else {
+            order = new Order();
+            userOrder.put(chatId, order);
+        }
+        return order;
     }
 
     @Override
