@@ -27,7 +27,7 @@ public class Order {
         }
     }
 
-    public boolean hasAddedAllHeroes(int expectedCount) {
+    public boolean hasRequiredCount(int expectedCount) {
         return heroes.size() >= expectedCount;
     }
 

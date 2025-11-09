@@ -53,9 +53,6 @@ public class VezunchikBot extends TelegramLongPollingBot {
             }
 
             Hero found = findHeroByName(heroName);
-            if (found == null){
-                BotLogger.warn("Hero not found");
-            }// warn
 
             if (order.hasHero(heroName)){
                order.removeHero(found);
@@ -64,12 +61,12 @@ public class VezunchikBot extends TelegramLongPollingBot {
                 order.addHero(found);
             }
 
-            if (order.hasAddedAllHeroes(config.getHeroesLimit())){
+            if (order.hasRequiredCount(config.getHeroesLimit())){
                 acceptOrder(order, chatId, username);
+                return;
             }
-            else{
-                sendHeroesPage(chatId, 0);
-            }
+
+            sendHeroesPage(chatId, 0);
         }
         else if (data.startsWith("pageNav_")){
             String[] parts = data.split("_");
@@ -186,6 +183,9 @@ public class VezunchikBot extends TelegramLongPollingBot {
                 break;
             }
         }
+        if (found == null){
+            BotLogger.warn("Hero not found");
+        }// warn
         return found;
     }
 
